@@ -16,6 +16,7 @@ import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
 import org.springframework.ai.chat.memory.repository.jdbc.PostgresChatMemoryRepositoryDialect;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.vectorstore.VectorStore;
 
 import reactor.core.publisher.Flux;
@@ -32,7 +33,7 @@ public class ChatController {
 	private final ChatClient chatClient;
 	private final VectorStore vectorStore;
 
-	public ChatController(ChatClient.Builder chatClient, DataSource dataSource, VectorStore vectorStore) {
+	public ChatController(ChatClient.Builder chatClient, DataSource dataSource, VectorStore vectorStore, ToolCallbackProvider toolCallbackProvider) {
 		var chatMemoryRepository = JdbcChatMemoryRepository.builder()
 				.dataSource(dataSource)
 				.dialect(new PostgresChatMemoryRepositoryDialect())
@@ -49,6 +50,8 @@ public class ChatController {
 				.defaultSystem(DEFAULT_SYSTEM_PROMPT)
 				.defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build(),
 						QuestionAnswerAdvisor.builder(vectorStore).build())
+				.defaultTools(new DateTimeTools(), new WeatherTools())
+				.defaultToolCallbacks(toolCallbackProvider)
 				.build();
 	}
 
