@@ -1,5 +1,7 @@
 package com.unicorn.agent;
 
+import java.util.List;
+
 import javax.sql.DataSource;
 
 import org.springframework.ai.chat.client.ChatClient;
@@ -8,10 +10,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.memory.repository.jdbc.JdbcChatMemoryRepository;
 import org.springframework.ai.chat.memory.repository.jdbc.PostgresChatMemoryRepositoryDialect;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.VectorStore;
 
 import reactor.core.publisher.Flux;
 
@@ -19,44 +24,54 @@ import reactor.core.publisher.Flux;
 @RequestMapping("api")
 public class ChatController {
 
-    private static final String DEFAULT_SYSTEM_PROMPT = """
-		You are a helpful AI assistant for Unicorn Rentals, a fictional company that rents unicorns.
-		Be friendly, helpful, and concise in your responses.
-		""";
+	private static final String DEFAULT_SYSTEM_PROMPT = """
+			You are a helpful AI assistant for Unicorn Rentals, a fictional company that rents unicorns.
+			Be friendly, helpful, and concise in your responses.
+			""";
 
 	private final ChatClient chatClient;
+	private final VectorStore vectorStore;
 
-	public ChatController (ChatClient.Builder chatClient, DataSource dataSource){
-        var chatMemoryRepository = JdbcChatMemoryRepository.builder()
-			.dataSource(dataSource)
-			.dialect(new PostgresChatMemoryRepositoryDialect())
-			.build();
+	public ChatController(ChatClient.Builder chatClient, DataSource dataSource, VectorStore vectorStore) {
+		var chatMemoryRepository = JdbcChatMemoryRepository.builder()
+				.dataSource(dataSource)
+				.dialect(new PostgresChatMemoryRepositoryDialect())
+				.build();
 
-        var chatMemory = MessageWindowChatMemory.builder()
-            .chatMemoryRepository(chatMemoryRepository)
-			.maxMessages(20)
-			.build();
+		var chatMemory = MessageWindowChatMemory.builder()
+				.chatMemoryRepository(chatMemoryRepository)
+				.maxMessages(20)
+				.build();
+
+		this.vectorStore = vectorStore;
 
 		this.chatClient = chatClient
-			.defaultSystem(DEFAULT_SYSTEM_PROMPT)
-            .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-			.build();
+				.defaultSystem(DEFAULT_SYSTEM_PROMPT)
+				.defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build(),
+						QuestionAnswerAdvisor.builder(vectorStore).build())
+				.build();
 	}
 
-    @PostMapping("chat")
-    public String chat(@RequestBody PromptRequest promptRequest){
-        var chatResponse = chatClient.prompt().user(promptRequest.prompt()).call().chatResponse();
-        return (chatResponse != null) ? chatResponse.getResult().getOutput().getText() : null;
-	}
-
-    @PostMapping("/chat/stream")
-	public Flux<String> chatStream(@RequestBody PromptRequest promptRequest){
-        var conversationId = "user1"; //This should be retrieved from the Auth context
-
-		return chatClient.prompt().user(promptRequest.prompt()).advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId)).stream().content();
-	}
-
-    record PromptRequest(String prompt) {
+	@PostMapping("load")
+    public void loadDataToVectorStore(@RequestBody String content) {
+        vectorStore.add(List.of(new Document(content)));
     }
+
+	@PostMapping("chat")
+	public String chat(@RequestBody PromptRequest promptRequest) {
+		var chatResponse = chatClient.prompt().user(promptRequest.prompt()).call().chatResponse();
+		return (chatResponse != null) ? chatResponse.getResult().getOutput().getText() : null;
+	}
+
+	@PostMapping("/chat/stream")
+	public Flux<String> chatStream(@RequestBody PromptRequest promptRequest) {
+		var conversationId = "user1"; // This should be retrieved from the Auth context
+
+		return chatClient.prompt().user(promptRequest.prompt())
+				.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId)).stream().content();
+	}
+
+	record PromptRequest(String prompt) {
+	}
 
 }
